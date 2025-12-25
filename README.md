@@ -1,97 +1,95 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+## 📱 金属探测小车 App — 开发进度总结
 
-# Getting Started
+---
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+### ✅ 已实现功能
 
-## Step 1: Start Metro
+| 模块 | 功能 | 状态 |
+| --- | --- | --- |
+| **项目基础** | React Native 0.83 项目搭建 | ✅ |
+|  | 底部 Tab 导航（5 个页面） | ✅ |
+|  | Release APK 打包配置 | ✅ |
+| **地图模块** | 高德地图 WebView 集成 | ✅ |
+|  | 地图显示（暗色主题） | ✅ |
+|  | 定位控件 | ✅ |
+|  | 小车位置标记 | ✅ |
+| **蓝牙模块** | 蓝牙权限请求 | ✅ |
+|  | 设备扫描 | ✅ |
+|  | 设备连接/断开 | ✅ |
+|  | 断线检测 | ✅ |
+|  | 发送指令（START/PAUSE/STOP） | ✅ |
+|  | 接收数据 | ✅ |
+|  | 下发路径数据 | ✅（基础版） |
+| **围栏模块** | 点击地图添加顶点 | ✅ |
+|  | 拖动顶点调整围栏 | ✅ |
+|  | 撤销/清除功能 | ✅ |
+|  | 围栏可视化（线 + 半透明填充） | ✅ |
+| **路径规划** | 弓字形覆盖路径生成 | ✅ |
+|  | 路径预览（虚线 + 起终点标记） | ✅ |
+|  | 路径长度/时间估算 | ✅ |
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+---
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+### 🔲 尚未完成功能
 
-```sh
-# Using npm
-npm start
+| 模块 | 功能 | 优先级 |
+| --- | --- | --- |
+| **主页整合** | 蓝牙状态同步到主页 | P0 |
+|  | 开始/暂停/停止按钮联动蓝牙 | P0 |
+|  | 实时显示小车位置（接收坐标更新地图） | P0 |
+|  | 任务进度显示 | P1 |
+| **探测结果** | 接收金属探测点数据 | P0 |
+|  | 在地图上标记探测点 | P0 |
+|  | 探测点列表查看 | P1 |
+|  | 结果导出（CSV/JSON） | P2 |
+| **围栏模块** | 围栏保存/加载 | P1 |
+|  | 多围栏管理 | P2 |
+| **路径规划** | 起点设置 | P1 |
+|  | 避障区域标记 | P2 |
+|  | 垂直/水平方向切换 UI | P1 |
+|  | 栅格间距可配置 UI | P1 |
+| **通信协议** | 分包发送（视通信模块而定） | P1 |
+|  | 与实际通信模块对接 | P0 |
+| **任务控制** | 状态机（空闲→运行→暂停→完成） | P1 |
+|  | 返航功能 | P1 |
+| **设置页** | 地图类型切换 | P2 |
+|  | 小车参数配置 | P2 |
+|  | 通信参数配置 | P2 |
+| **其他** | 离线地图 | P2 |
+|  | 历史任务记录 | P2 |
 
-# OR using Yarn
-yarn start
+---
+
+### 📁 项目结构
+
+```
+MetalDetector/
+├── src/
+│   ├── components/
+│   │   └── AMapView.tsx        # 地图组件
+│   ├── screens/
+│   │   ├── HomeScreen.tsx      # 主页
+│   │   ├── DeviceScreen.tsx    # 设备连接
+│   │   ├── FenceScreen.tsx     # 围栏绘制
+│   │   ├── ResultScreen.tsx    # 探测结果（待完善）
+│   │   └── SettingsScreen.tsx  # 设置（待完善）
+│   ├── services/
+│   │   ├── BleService.ts       # 蓝牙服务
+│   │   └── PathPlanner.ts      # 路径规划
+│   └── utils/                  # 工具函数（待添加）
+├── android/                    # Android 原生配置
+├── App.tsx                     # 入口 + 导航配置
+└── index.js                    # 启动入口
 ```
 
-## Step 2: Build and run your app
+---
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+### 🔑 配置信息（记得保管好）
 
-### Android
+| 项目 | 位置 |
+| --- | --- |
+| 高德 JS API Key | `HomeScreen.tsx` / `FenceScreen.tsx` |
+| 高德安全密钥 | 同上 |
+| 签名密钥 | `android/app/release.keystore` |
+| 签名配置 | `android/[keystore.properties](http://keystore.properties)` |
 
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
-```
-
-### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
-```
-
-Then, and every time you update your native dependencies, run:
-
-```sh
-bundle exec pod install
-```
-
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
-```
-
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
