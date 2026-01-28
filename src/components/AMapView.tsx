@@ -190,103 +190,96 @@ export const AMapView: React.FC<AMapViewProps> = ({
             }
           };
 
-          // 更新折线 - 使用 Canvas 自定义图层提升大量路径的渲染性能
-          var pathCanvas = null;
-          var pathCtx = null;
-          var cachedPath = null;
+          // 更新折线 - 使用原生 Polyline + 路径简化优化
+          var fullPath = null;
           
-          // 初始化 Canvas 图层
-          function initPathCanvas() {
-            if (pathCanvas) return;
+          // Douglas-Peucker 路径简化算法
+          function simplifyPathDP(points, tolerance) {
+            if (points.length <= 2) return points;
             
-            var size = map.getSize();
-            pathCanvas = document.createElement('canvas');
-            pathCanvas.width = size.width * 2;  // 高清屏适配
-            pathCanvas.height = size.height * 2;
-            pathCanvas.style.width = size.width + 'px';
-            pathCanvas.style.height = size.height + 'px';
-            pathCanvas.style.position = 'absolute';
-            pathCanvas.style.top = '0';
-            pathCanvas.style.left = '0';
-            pathCanvas.style.pointerEvents = 'none';
-            pathCanvas.style.zIndex = '100';
-            pathCtx = pathCanvas.getContext('2d');
-            pathCtx.scale(2, 2);
+            var maxDist = 0, maxIndex = 0;
+            var end = points.length - 1;
             
-            document.getElementById('map').appendChild(pathCanvas);
-            
-            // 监听地图移动和缩放，重绘路径
-            map.on('mapmove', function() { drawPath(); });
-            map.on('zoomchange', function() { drawPath(); });
-          }
-          
-          // 绘制路径到 Canvas
-          function drawPath() {
-            if (!pathCtx || !cachedPath || cachedPath.length < 2) return;
-            
-            var size = map.getSize();
-            pathCtx.clearRect(0, 0, size.width, size.height);
-            
-            pathCtx.strokeStyle = '#50D1AA';
-            pathCtx.lineWidth = 2;
-            pathCtx.setLineDash([8, 4]);
-            pathCtx.lineCap = 'round';
-            pathCtx.lineJoin = 'round';
-            
-            pathCtx.beginPath();
-            
-            for (var i = 0; i < cachedPath.length; i++) {
-              var pixel = map.lngLatToContainer(new AMap.LngLat(cachedPath[i].lng, cachedPath[i].lat));
-              if (i === 0) {
-                pathCtx.moveTo(pixel.x, pixel.y);
-              } else {
-                pathCtx.lineTo(pixel.x, pixel.y);
+            for (var i = 1; i < end; i++) {
+              var dist = perpendicularDist(points[i], points[0], points[end]);
+              if (dist > maxDist) {
+                maxDist = dist;
+                maxIndex = i;
               }
             }
             
-            pathCtx.stroke();
+            if (maxDist > tolerance) {
+              var left = simplifyPathDP(points.slice(0, maxIndex + 1), tolerance);
+              var right = simplifyPathDP(points.slice(maxIndex), tolerance);
+              return left.slice(0, -1).concat(right);
+            }
+            return [points[0], points[end]];
+          }
+          
+          function perpendicularDist(point, lineStart, lineEnd) {
+            var dx = lineEnd.lng - lineStart.lng;
+            var dy = lineEnd.lat - lineStart.lat;
+            if (dx === 0 && dy === 0) {
+              return Math.sqrt(Math.pow(point.lng - lineStart.lng, 2) + Math.pow(point.lat - lineStart.lat, 2));
+            }
+            var t = ((point.lng - lineStart.lng) * dx + (point.lat - lineStart.lat) * dy) / (dx * dx + dy * dy);
+            var nearestLng = lineStart.lng + t * dx;
+            var nearestLat = lineStart.lat + t * dy;
+            return Math.sqrt(Math.pow(point.lng - nearestLng, 2) + Math.pow(point.lat - nearestLat, 2));
+          }
+          
+          // 根据缩放级别计算简化容差
+          function getToleranceForZoom(zoom) {
+            var baseTolerance = 0.00001;
+            var zoomDiff = 15 - zoom;
+            return baseTolerance * Math.pow(2, Math.max(0, zoomDiff));
+          }
+          
+          // 缩放结束时更新路径显示
+          function onZoomEnd() {
+            if (!fullPath || fullPath.length < 2 || !currentPolyline) return;
+            
+            var zoom = map.getZoom();
+            var tolerance = getToleranceForZoom(zoom);
+            var simplifiedPath = fullPath.length > 100 ? simplifyPathDP(fullPath, tolerance) : fullPath;
+            
+            currentPolyline.setPath(simplifiedPath.map(function(p) { 
+              return new AMap.LngLat(p.lng, p.lat); 
+            }));
           }
           
           window.updatePolyline = function(path) {
-            // 清除旧的 AMap Polyline
+            // 清除旧的 Polyline
             if (currentPolyline) {
               currentPolyline.setMap(null);
               currentPolyline = null;
             }
             
-            // 路径点较少时使用 AMap Polyline（质量更好）
-            // 路径点较多时使用 Canvas（性能更好）
-            var CANVAS_THRESHOLD = 100;
-            
             if (!path || path.length < 2) {
-              cachedPath = null;
-              if (pathCtx) {
-                var size = map.getSize();
-                pathCtx.clearRect(0, 0, size.width, size.height);
-              }
+              fullPath = null;
               return;
             }
             
-            if (path.length <= CANVAS_THRESHOLD) {
-              // 点数较少，使用原生 Polyline
-              cachedPath = null;
-              if (pathCtx) {
-                var size = map.getSize();
-                pathCtx.clearRect(0, 0, size.width, size.height);
-              }
-              currentPolyline = new AMap.Polyline({
-                path: path.map(function(p) { return new AMap.LngLat(p.lng, p.lat); }),
-                strokeColor: '#50D1AA',
-                strokeWeight: 3,
-                strokeStyle: 'dashed',
-                map: map
-              });
-            } else {
-              // 点数较多，使用 Canvas 渲染
-              initPathCanvas();
-              cachedPath = path;
-              drawPath();
-            }
+            // 保存完整路径用于缩放时重新简化
+            fullPath = path;
+            
+            // 根据当前缩放级别简化路径
+            var zoom = map.getZoom();
+            var tolerance = getToleranceForZoom(zoom);
+            var simplifiedPath = path.length > 100 ? simplifyPathDP(path, tolerance) : path;
+            
+            // 使用原生 Polyline 渲染（更可靠，不会错位）
+            currentPolyline = new AMap.Polyline({
+              path: simplifiedPath.map(function(p) { return new AMap.LngLat(p.lng, p.lat); }),
+              strokeColor: '#50D1AA',
+              strokeWeight: 3,
+              strokeStyle: 'dashed',
+              map: map
+            });
+            
+            // 监听缩放，动态调整路径精度
+            map.off('zoomend', onZoomEnd);
+            map.on('zoomend', onZoomEnd);
           };
 
           map.on('click', function(e) {

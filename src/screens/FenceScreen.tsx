@@ -1,19 +1,30 @@
-import React, {useState, useCallback} from 'react';
-import {View, Text, StyleSheet, Alert} from 'react-native';
+import React, {useState, useCallback, useMemo} from 'react';
+import {View, Text, StyleSheet, Alert, TouchableOpacity} from 'react-native';
 import {BaseLayout, Card, Button, AMapView} from '../components';
 import {colors, spacing} from '../theme';
 import PathPlanner, {Point} from '../services/PathPlanner';
 import BleService from '../services/BleService';
 
+type PolygonMode = 'convex' | 'concave';
+
 const FenceScreen: React.FC = () => {
   const [fencePoints, setFencePoints] = useState<Point[]>([]);
   const [path, setPath] = useState<Point[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [polygonMode, setPolygonMode] = useState<PolygonMode>('concave'); // 默认支持凹多边形
   const [pathInfo, setPathInfo] = useState<{
     length: number;
     time: number;
     area: number;
   } | null>(null);
+
+  // 根据模式计算显示用的多边形
+  const displayPolygon = useMemo(() => {
+    if (fencePoints.length < 3) return undefined;
+    return polygonMode === 'convex' 
+      ? PathPlanner.computeConvexHull(fencePoints)
+      : PathPlanner.sortPointsByAngle(fencePoints);
+  }, [fencePoints, polygonMode]);
 
   const handleMapClick = useCallback(
     (point: Point) => {
@@ -45,19 +56,26 @@ const FenceScreen: React.FC = () => {
       return;
     }
 
-    const generatedPath = PathPlanner.generateZigzagPath(fencePoints);
+    // 根据模式生成路径
+    const useConvexHull = polygonMode === 'convex';
+    const generatedPath = PathPlanner.generateZigzagPath(fencePoints, useConvexHull);
     setPath(generatedPath);
 
     const length = PathPlanner.calculatePathLength(generatedPath);
     const time = PathPlanner.estimateTime(length);
-    const area = PathPlanner.calculatePolygonArea(fencePoints);
+    
+    // 面积也根据模式计算
+    const areaPolygon = useConvexHull 
+      ? PathPlanner.computeConvexHull(fencePoints)
+      : PathPlanner.sortPointsByAngle(fencePoints);
+    const area = PathPlanner.calculatePolygonArea(areaPolygon);
 
     setPathInfo({
       length: Math.round(length),
       time: Math.round(time * 10) / 10,
       area: Math.round(area),
     });
-  }, [fencePoints]);
+  }, [fencePoints, polygonMode]);
 
   const sendPathToDevice = useCallback(async () => {
     if (path.length === 0) {
@@ -94,11 +112,31 @@ const FenceScreen: React.FC = () => {
       <View style={styles.container}>
         <Text style={styles.title}>区域规划</Text>
 
+        {/* 模式切换 */}
+        <View style={styles.modeSwitch}>
+          <TouchableOpacity
+            style={[styles.modeBtn, polygonMode === 'concave' && styles.modeBtnActive]}
+            onPress={() => setPolygonMode('concave')}
+          >
+            <Text style={[styles.modeBtnText, polygonMode === 'concave' && styles.modeBtnTextActive]}>
+              精确模式
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeBtn, polygonMode === 'convex' && styles.modeBtnActive]}
+            onPress={() => setPolygonMode('convex')}
+          >
+            <Text style={[styles.modeBtnText, polygonMode === 'convex' && styles.modeBtnTextActive]}>
+              外围模式
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* 地图 */}
         <Card style={styles.mapCard} padding={false}>
           <AMapView
             style={styles.map}
-            polygon={fencePoints.length >= 3 ? fencePoints : undefined}
+            polygon={displayPolygon}
             polyline={path.length > 0 ? path : undefined}
             onMapClick={handleMapClick}
             markers={fencePoints.map((p, i) => ({
@@ -111,9 +149,16 @@ const FenceScreen: React.FC = () => {
         {/* 状态提示 */}
         <Card style={styles.infoCard}>
           {isDrawing ? (
-            <Text style={styles.infoText}>
-              点击地图添加围栏顶点（已添加 {fencePoints.length} 个点）
-            </Text>
+            <View>
+              <Text style={styles.infoText}>
+                点击地图添加围栏顶点（已添加 {fencePoints.length} 个点）
+              </Text>
+              <Text style={styles.infoHint}>
+                {polygonMode === 'concave' 
+                  ? '精确模式：支持凹字形等复杂区域' 
+                  : '外围模式：自动生成最大外围区域'}
+              </Text>
+            </View>
           ) : pathInfo ? (
             <View style={styles.pathInfoRow}>
               <View style={styles.pathInfoItem}>
@@ -197,7 +242,32 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: colors.textPrimary,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  modeSwitch: {
+    flexDirection: 'row',
+    backgroundColor: colors.card,
+    borderRadius: 8,
+    padding: 4,
+    marginBottom: spacing.md,
+  },
+  modeBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  modeBtnActive: {
+    backgroundColor: colors.primary,
+  },
+  modeBtnText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  modeBtnTextActive: {
+    color: '#fff',
+    fontWeight: '600',
   },
   mapCard: {
     flex: 1,
@@ -215,6 +285,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSecondary,
     textAlign: 'center',
+  },
+  infoHint: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 4,
+    opacity: 0.7,
   },
   pathInfoRow: {
     flexDirection: 'row',

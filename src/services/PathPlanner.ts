@@ -33,13 +33,84 @@ class PathPlanner {
     return {...this.config};
   }
 
-  // 生成弓字形覆盖路径
-  generateZigzagPath(polygon: Point[]): Point[] {
+  /**
+   * 按极角排序点集，形成简单多边形（不自相交）
+   * 支持凹多边形，保留所有顶点
+   */
+  sortPointsByAngle(points: Point[]): Point[] {
+    if (points.length < 3) return [...points];
+
+    // 计算质心作为参考点
+    const centroid = {
+      lat: points.reduce((sum, p) => sum + p.lat, 0) / points.length,
+      lng: points.reduce((sum, p) => sum + p.lng, 0) / points.length,
+    };
+
+    // 按相对于质心的极角排序
+    const sorted = [...points].sort((a, b) => {
+      const angleA = Math.atan2(a.lat - centroid.lat, a.lng - centroid.lng);
+      const angleB = Math.atan2(b.lat - centroid.lat, b.lng - centroid.lng);
+      return angleA - angleB;
+    });
+
+    return sorted;
+  }
+
+  /**
+   * 计算凸包 - Graham Scan 算法
+   * 仅在需要时使用（如计算最大外围边界）
+   */
+  computeConvexHull(points: Point[]): Point[] {
+    if (points.length < 3) return [...points];
+
+    let start = 0;
+    for (let i = 1; i < points.length; i++) {
+      if (
+        points[i].lat < points[start].lat ||
+        (points[i].lat === points[start].lat && points[i].lng < points[start].lng)
+      ) {
+        start = i;
+      }
+    }
+
+    const startPoint = points[start];
+    const remaining = points.filter((_, i) => i !== start);
+
+    remaining.sort((a, b) => {
+      const angleA = Math.atan2(a.lat - startPoint.lat, a.lng - startPoint.lng);
+      const angleB = Math.atan2(b.lat - startPoint.lat, b.lng - startPoint.lng);
+      if (angleA !== angleB) return angleA - angleB;
+      const distA = (a.lng - startPoint.lng) ** 2 + (a.lat - startPoint.lat) ** 2;
+      const distB = (b.lng - startPoint.lng) ** 2 + (b.lat - startPoint.lat) ** 2;
+      return distA - distB;
+    });
+
+    const hull: Point[] = [startPoint];
+    for (const point of remaining) {
+      while (hull.length >= 2 && this.crossProduct(hull[hull.length - 2], hull[hull.length - 1], point) <= 0) {
+        hull.pop();
+      }
+      hull.push(point);
+    }
+    return hull;
+  }
+
+  private crossProduct(o: Point, a: Point, b: Point): number {
+    return (a.lng - o.lng) * (b.lat - o.lat) - (a.lat - o.lat) * (b.lng - o.lng);
+  }
+
+  // 生成弓字形覆盖路径（支持凹多边形）
+  generateZigzagPath(polygon: Point[], useConvexHull: boolean = false): Point[] {
     if (polygon.length < 3) {
       return [];
     }
 
-    const bounds = this.getBounds(polygon);
+    // 根据参数选择使用凸包还是排序后的原始多边形
+    const processedPolygon = useConvexHull 
+      ? this.computeConvexHull(polygon) 
+      : this.sortPointsByAngle(polygon);
+    
+    const bounds = this.getBounds(processedPolygon);
     const spacingDeg = this.metersToLatDegrees(this.config.spacing);
     const path: Point[] = [];
 
@@ -47,27 +118,42 @@ class PathPlanner {
       // 水平弓字形
       let lat = bounds.minLat;
       let direction = 1; // 1: left to right, -1: right to left
-      let lineIndex = 0;
 
       while (lat <= bounds.maxLat) {
-        const intersections = this.findIntersections(polygon, lat, 'horizontal');
+        // 对于凹多边形，可能有多个交点对
+        const intersections = this.findIntersections(processedPolygon, lat, 'horizontal');
 
         if (intersections.length >= 2) {
           intersections.sort((a, b) => a.lng - b.lng);
+          
+          // 处理凹多边形的多段交点：成对处理
+          const segments: Array<{start: Point; end: Point}> = [];
+          for (let i = 0; i < intersections.length - 1; i += 2) {
+            if (i + 1 < intersections.length) {
+              segments.push({
+                start: intersections[i],
+                end: intersections[i + 1]
+              });
+            }
+          }
 
+          // 根据方向添加路径段
           if (direction === 1) {
-            path.push(intersections[0]);
-            path.push(intersections[intersections.length - 1]);
+            for (const seg of segments) {
+              path.push(seg.start);
+              path.push(seg.end);
+            }
           } else {
-            path.push(intersections[intersections.length - 1]);
-            path.push(intersections[0]);
+            for (let i = segments.length - 1; i >= 0; i--) {
+              path.push(segments[i].end);
+              path.push(segments[i].start);
+            }
           }
 
           direction *= -1;
         }
 
         lat += spacingDeg;
-        lineIndex++;
       }
     } else {
       // 垂直弓字形
@@ -76,17 +162,32 @@ class PathPlanner {
       const spacingLng = this.metersToLngDegrees(this.config.spacing, bounds.minLat);
 
       while (lng <= bounds.maxLng) {
-        const intersections = this.findIntersections(polygon, lng, 'vertical');
+        const intersections = this.findIntersections(processedPolygon, lng, 'vertical');
 
         if (intersections.length >= 2) {
           intersections.sort((a, b) => a.lat - b.lat);
 
+          // 处理凹多边形的多段交点
+          const segments: Array<{start: Point; end: Point}> = [];
+          for (let i = 0; i < intersections.length - 1; i += 2) {
+            if (i + 1 < intersections.length) {
+              segments.push({
+                start: intersections[i],
+                end: intersections[i + 1]
+              });
+            }
+          }
+
           if (direction === 1) {
-            path.push(intersections[0]);
-            path.push(intersections[intersections.length - 1]);
+            for (const seg of segments) {
+              path.push(seg.start);
+              path.push(seg.end);
+            }
           } else {
-            path.push(intersections[intersections.length - 1]);
-            path.push(intersections[0]);
+            for (let i = segments.length - 1; i >= 0; i--) {
+              path.push(segments[i].end);
+              path.push(segments[i].start);
+            }
           }
 
           direction *= -1;
