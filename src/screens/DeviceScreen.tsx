@@ -1,25 +1,35 @@
-import React, {useState, useEffect, useCallback} from 'react';
+import React, {useCallback, useEffect} from 'react';
 import {View, Text, StyleSheet, FlatList, TouchableOpacity, Alert} from 'react-native';
 import {BaseLayout, Card, Button, StatusBadge} from '../components';
-import {colors, spacing, borderRadius} from '../theme';
-import BleService, {BleDevice, ConnectionState} from '../services/BleService';
+import {colors, spacing, borderRadius, typography} from '../theme';
+import BleService from '../services/BleService';
+import {BLE_CONFIG} from '../constants';
+import {
+  useDeviceStore,
+  selectConnectionState,
+  selectConnectedDeviceId,
+  selectConnectedDeviceName,
+  selectScannedDevices,
+  selectIsScanning,
+} from '../stores';
+
+interface ScannedDevice {
+  id: string;
+  name: string | null;
+  rssi: number | null;
+}
 
 const DeviceScreen: React.FC = () => {
-  const [devices, setDevices] = useState<BleDevice[]>([]);
-  const [scanning, setScanning] = useState(false);
-  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
-  const [connectedDeviceId, setConnectedDeviceId] = useState<string | null>(null);
+  // 从 Zustand store 读取状态（使用原始值选择器避免对象重建导致无限循环）
+  const connectionState = useDeviceStore(selectConnectionState);
+  const connectedDeviceId = useDeviceStore(selectConnectedDeviceId);
+  const connectedDeviceName = useDeviceStore(selectConnectedDeviceName);
+  const devices = useDeviceStore(selectScannedDevices);
+  const scanning = useDeviceStore(selectIsScanning);
+  const clearScannedDevices = useDeviceStore(state => state.clearScannedDevices);
 
   useEffect(() => {
-    const unsubscribe = BleService.onStateChange(state => {
-      setConnectionState(state);
-      if (state === 'disconnected') {
-        setConnectedDeviceId(null);
-      }
-    });
-
     return () => {
-      unsubscribe();
       BleService.stopScan();
     };
   }, []);
@@ -31,45 +41,32 @@ const DeviceScreen: React.FC = () => {
       return;
     }
 
-    setDevices([]);
-    setScanning(true);
+    clearScannedDevices();
+    BleService.startScan();
 
-    BleService.startScan(device => {
-      setDevices(prev => {
-        const exists = prev.find(d => d.id === device.id);
-        if (exists) {
-          return prev.map(d => (d.id === device.id ? device : d));
-        }
-        return [...prev, device];
-      });
-    });
-
-    // 10秒后自动停止扫描
+    // 扫描超时后自动停止
     setTimeout(() => {
-      stopScan();
-    }, 10000);
-  }, []);
+      BleService.stopScan();
+    }, BLE_CONFIG.SCAN_TIMEOUT_MS);
+  }, [clearScannedDevices]);
 
   const stopScan = useCallback(() => {
     BleService.stopScan();
-    setScanning(false);
   }, []);
 
-  const connectDevice = useCallback(async (device: BleDevice) => {
-    stopScan();
+  const connectDevice = useCallback(async (device: ScannedDevice) => {
+    BleService.stopScan();
     const success = await BleService.connect(device.id);
-    if (success) {
-      setConnectedDeviceId(device.id);
-    } else {
+    if (!success) {
       Alert.alert('连接失败', '无法连接到设备，请重试');
     }
-  }, [stopScan]);
+  }, []);
 
   const disconnectDevice = useCallback(async () => {
     await BleService.disconnect();
   }, []);
 
-  const renderDevice = ({item}: {item: BleDevice}) => {
+  const renderDevice = ({item}: {item: ScannedDevice}) => {
     const isConnected = item.id === connectedDeviceId;
 
     return (
@@ -117,7 +114,7 @@ const DeviceScreen: React.FC = () => {
             <View style={styles.connectedInfo}>
               <Text style={styles.connectedLabel}>已连接设备</Text>
               <Text style={styles.connectedDevice}>
-                {devices.find(d => d.id === connectedDeviceId)?.name || connectedDeviceId}
+                {connectedDeviceName || connectedDeviceId}
               </Text>
             </View>
           )}
@@ -173,10 +170,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.textPrimary,
-    marginBottom: spacing.lg,
+    ...typography.pageTitle,
   },
   statusCard: {
     marginBottom: spacing.lg,

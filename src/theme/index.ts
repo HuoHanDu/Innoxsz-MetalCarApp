@@ -27,7 +27,10 @@ export const borderRadius = {
   large: 16,   // 大卡片
 };
 
+// ==================== 排版样式 ====================
+
 export const typography = {
+  // 基础样式
   h1: {
     fontSize: 28,
     fontWeight: 'bold' as const,
@@ -53,7 +56,54 @@ export const typography = {
     fontWeight: 'normal' as const,
     color: colors.textSecondary,
   },
+
+  // 页面级样式（含 margin）
+  pageTitle: {
+    fontSize: 24,
+    fontWeight: 'bold' as const,
+    color: colors.textPrimary,
+    marginBottom: spacing.lg,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: colors.textPrimary,
+    marginBottom: spacing.md,
+  },
+  cardTitle: {
+    fontSize: 14,
+    fontWeight: 'normal' as const,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: 'normal' as const,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  value: {
+    fontSize: 18,
+    fontWeight: 'bold' as const,
+    color: colors.textPrimary,
+  },
+  valueSmall: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: colors.textPrimary,
+  },
+  hint: {
+    fontSize: 14,
+    fontWeight: 'normal' as const,
+    color: colors.textSecondary,
+  },
 };
+
+// 类型导出
+export type Colors = typeof colors;
+export type Spacing = typeof spacing;
+export type BorderRadius = typeof borderRadius;
+export type Typography = typeof typography;
 
 export default {
   colors,

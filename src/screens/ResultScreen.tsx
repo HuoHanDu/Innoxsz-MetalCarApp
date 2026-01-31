@@ -1,71 +1,63 @@
-import React, {useState, useEffect} from 'react';
+import React, {useState, useMemo} from 'react';
 import {View, Text, StyleSheet, FlatList, TouchableOpacity} from 'react-native';
 import {BaseLayout, Card, Button, AMapView} from '../components';
-import {colors, spacing, borderRadius} from '../theme';
-import BleService from '../services/BleService';
-
-interface DetectionPoint {
-  id: string;
-  lat: number;
-  lng: number;
-  strength: number;
-  timestamp: Date;
-}
+import {colors, spacing, borderRadius, typography} from '../theme';
+import {useMapKeys} from '../hooks';
+import {
+  useDeviceStore,
+  selectDetectionResults,
+  selectCurrentPosition,
+  DetectionResult,
+} from '../stores';
 
 type ViewMode = 'map' | 'list';
 
 const ResultScreen: React.FC = () => {
+  const {keys: mapKeys} = useMapKeys();
   const [viewMode, setViewMode] = useState<ViewMode>('map');
-  const [detections, setDetections] = useState<DetectionPoint[]>([]);
+  
+  // 从 store 获取检测结果和当前位置
+  const detections = useDeviceStore(selectDetectionResults);
+  const currentPosition = useDeviceStore(selectCurrentPosition);
+  const clearDetectionResults = useDeviceStore(state => state.clearDetectionResults);
 
-  useEffect(() => {
-    // 监听探测数据
-    const unsubscribe = BleService.onData(data => {
-      if (data.startsWith('DETECT:')) {
-        const parts = data.slice(7).split(',');
-        if (parts.length >= 3) {
-          const newDetection: DetectionPoint = {
-            id: Date.now().toString(),
-            lat: parseFloat(parts[0]),
-            lng: parseFloat(parts[1]),
-            strength: parseFloat(parts[2]),
-            timestamp: new Date(),
-          };
-          setDetections(prev => [newDetection, ...prev]);
-        }
-      }
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  const getStrengthColor = (strength: number) => {
-    if (strength >= 80) return colors.error;
-    if (strength >= 50) return colors.warning;
-    return colors.success;
+  // 根据金属类型获取颜色
+  const getTypeColor = (metalType?: string) => {
+    switch (metalType?.toLowerCase()) {
+      case 'gold':
+        return '#FFD700';
+      case 'iron':
+        return colors.error;
+      case 'copper':
+        return '#B87333';
+      default:
+        return colors.primary;
+    }
   };
 
-  const getStrengthLabel = (strength: number) => {
-    if (strength >= 80) return '强';
-    if (strength >= 50) return '中';
-    return '弱';
+  // 根据深度获取标签
+  const getDepthLabel = (depth?: number) => {
+    if (depth === undefined) return '未知';
+    if (depth < 0.3) return '浅层';
+    if (depth < 0.8) return '中层';
+    return '深层';
   };
 
-  const renderDetectionItem = ({item}: {item: DetectionPoint}) => (
+  const renderDetectionItem = ({item}: {item: DetectionResult}) => (
     <TouchableOpacity style={styles.detectionItem}>
       <View style={styles.detectionLeft}>
         <View
           style={[
             styles.strengthIndicator,
-            {backgroundColor: getStrengthColor(item.strength)},
+            {backgroundColor: getTypeColor(item.metalType)},
           ]}
         />
         <View>
           <Text style={styles.detectionCoords}>
-            {item.lat.toFixed(6)}, {item.lng.toFixed(6)}
+            {item.position.lat.toFixed(6)}, {item.position.lng.toFixed(6)}
           </Text>
           <Text style={styles.detectionTime}>
-            {item.timestamp.toLocaleTimeString()}
+            {new Date(item.timestamp).toLocaleTimeString()}
           </Text>
         </View>
       </View>
@@ -73,21 +65,28 @@ const ResultScreen: React.FC = () => {
         <Text
           style={[
             styles.strengthValue,
-            {color: getStrengthColor(item.strength)},
+            {color: getTypeColor(item.metalType)},
           ]}>
-          {item.strength}%
+          {item.metalType || '未知'}
         </Text>
         <Text style={styles.strengthLabel}>
-          信号{getStrengthLabel(item.strength)}
+          {item.depth ? `${item.depth}m · ${getDepthLabel(item.depth)}` : '深度未知'}
         </Text>
       </View>
     </TouchableOpacity>
   );
 
-  const mapMarkers = detections.map(d => ({
-    position: {lat: d.lat, lng: d.lng},
-    title: `信号: ${d.strength}%`,
-  }));
+  const mapMarkers = useMemo(() => [
+    // 小车位置
+    ...(currentPosition
+      ? [{position: currentPosition, title: '小车位置'}]
+      : []),
+    // 检测点
+    ...detections.map(d => ({
+      position: d.position,
+      title: `${d.metalType || '未知'} · ${d.depth ? d.depth + 'm' : ''}`,
+    })),
+  ], [currentPosition, detections]);
 
   return (
     <BaseLayout>
@@ -126,7 +125,13 @@ const ResultScreen: React.FC = () => {
         {/* 内容区域 */}
         {viewMode === 'map' ? (
           <Card style={styles.mapCard} padding={false}>
-            <AMapView style={styles.map} markers={mapMarkers} />
+            <AMapView
+              style={styles.map}
+              apiKey={mapKeys.apiKey}
+              securityKey={mapKeys.securityKey}
+              center={currentPosition || (detections.length > 0 ? detections[0].position : undefined)}
+              markers={mapMarkers}
+            />
           </Card>
         ) : (
           <FlatList
@@ -152,23 +157,30 @@ const ResultScreen: React.FC = () => {
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
                 <View style={[styles.statDot, {backgroundColor: colors.error}]} />
-                <Text style={styles.statLabel}>强信号</Text>
+                <Text style={styles.statLabel}>铁</Text>
                 <Text style={styles.statValue}>
-                  {detections.filter(d => d.strength >= 80).length}
+                  {detections.filter(d => d.metalType?.toLowerCase() === 'iron').length}
                 </Text>
               </View>
               <View style={styles.statItem}>
-                <View style={[styles.statDot, {backgroundColor: colors.warning}]} />
-                <Text style={styles.statLabel}>中信号</Text>
+                <View style={[styles.statDot, {backgroundColor: '#B87333'}]} />
+                <Text style={styles.statLabel}>铜</Text>
                 <Text style={styles.statValue}>
-                  {detections.filter(d => d.strength >= 50 && d.strength < 80).length}
+                  {detections.filter(d => d.metalType?.toLowerCase() === 'copper').length}
                 </Text>
               </View>
               <View style={styles.statItem}>
-                <View style={[styles.statDot, {backgroundColor: colors.success}]} />
-                <Text style={styles.statLabel}>弱信号</Text>
+                <View style={[styles.statDot, {backgroundColor: '#FFD700'}]} />
+                <Text style={styles.statLabel}>金</Text>
                 <Text style={styles.statValue}>
-                  {detections.filter(d => d.strength < 50).length}
+                  {detections.filter(d => d.metalType?.toLowerCase() === 'gold').length}
+                </Text>
+              </View>
+              <View style={styles.statItem}>
+                <View style={[styles.statDot, {backgroundColor: colors.textSecondary}]} />
+                <Text style={styles.statLabel}>其他</Text>
+                <Text style={styles.statValue}>
+                  {detections.filter(d => !['iron', 'copper', 'gold'].includes(d.metalType?.toLowerCase() || '')).length}
                 </Text>
               </View>
             </View>
@@ -179,7 +191,7 @@ const ResultScreen: React.FC = () => {
         {detections.length > 0 && (
           <Button
             title="清除记录"
-            onPress={() => setDetections([])}
+            onPress={clearDetectionResults}
             variant="outline"
           />
         )}
@@ -200,13 +212,11 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.textPrimary,
+    ...typography.pageTitle,
+    marginBottom: 0,
   },
   count: {
-    fontSize: 14,
-    color: colors.textSecondary,
+    ...typography.hint,
   },
   modeSwitch: {
     flexDirection: 'row',

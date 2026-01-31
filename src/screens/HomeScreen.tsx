@@ -1,48 +1,33 @@
-import React, {useState, useEffect} from 'react';
+import React, {useMemo} from 'react';
 import {View, Text, StyleSheet, ScrollView} from 'react-native';
 import {BaseLayout, Card, StatusBadge, BatteryIndicator, ProgressRing, AMapView} from '../components';
-import {colors, spacing} from '../theme';
-import BleService, {ConnectionState} from '../services/BleService';
-
-interface DeviceStatus {
-  carBattery: number;
-  remoteBattery: number;
-  progress: number;
-  position: {lat: number; lng: number} | null;
-}
+import {colors, spacing, typography} from '../theme';
+import {
+  useDeviceStore,
+  useSettingsStore,
+  selectConnectionState,
+  selectCarBattery,
+  selectRemoteBattery,
+  selectCurrentPosition,
+  selectProgress,
+  selectDetectionCount,
+  selectAmapKey,
+  selectAmapSecurityKey,
+} from '../stores';
 
 const HomeScreen: React.FC = () => {
-  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
-  const [deviceStatus, setDeviceStatus] = useState<DeviceStatus>({
-    carBattery: 85,
-    remoteBattery: 72,
-    progress: 35,
-    position: {lat: 39.9042, lng: 116.4074},
-  });
+  // 从 Zustand store 读取状态 - 使用原始值选择器避免无限循环
+  const connectionState = useDeviceStore(selectConnectionState);
+  const carBattery = useDeviceStore(selectCarBattery);
+  const remoteBattery = useDeviceStore(selectRemoteBattery);
+  const currentPosition = useDeviceStore(selectCurrentPosition);
+  const progress = useDeviceStore(selectProgress);
+  const detectionCount = useDeviceStore(selectDetectionCount);
+  const apiKey = useSettingsStore(selectAmapKey);
+  const securityKey = useSettingsStore(selectAmapSecurityKey);
 
-  useEffect(() => {
-    // 监听连接状态
-    const unsubState = BleService.onStateChange(setConnectionState);
-
-    // 监听数据
-    const unsubData = BleService.onData(data => {
-      // 解析设备数据
-      if (data.startsWith('POS:')) {
-        const [lat, lng] = data.slice(4).split(',').map(Number);
-        setDeviceStatus(prev => ({...prev, position: {lat, lng}}));
-      } else if (data.startsWith('BATTERY:')) {
-        const battery = parseInt(data.slice(8), 10);
-        setDeviceStatus(prev => ({...prev, carBattery: battery}));
-      }
-    });
-
-    return () => {
-      unsubState();
-      unsubData();
-    };
-  }, []);
-
-  const getConnectionStatus = () => {
+  // 连接状态映射
+  const connStatus = useMemo(() => {
     switch (connectionState) {
       case 'connected':
         return {status: 'success' as const, text: '已连接'};
@@ -51,9 +36,7 @@ const HomeScreen: React.FC = () => {
       default:
         return {status: 'error' as const, text: '未连接'};
     }
-  };
-
-  const connStatus = getConnectionStatus();
+  }, [connectionState]);
 
   return (
     <BaseLayout>
@@ -68,10 +51,12 @@ const HomeScreen: React.FC = () => {
         <Card style={styles.mapCard} padding={false}>
           <AMapView
             style={styles.map}
-            center={deviceStatus.position || undefined}
+            apiKey={apiKey}
+            securityKey={securityKey}
+            center={currentPosition || undefined}
             markers={
-              deviceStatus.position
-                ? [{position: deviceStatus.position, title: '小车位置'}]
+              currentPosition
+                ? [{position: currentPosition, title: '小车位置'}]
                 : []
             }
           />
@@ -83,10 +68,10 @@ const HomeScreen: React.FC = () => {
           <Card style={styles.statusCard}>
             <Text style={styles.cardTitle}>设备电量</Text>
             <View style={styles.batteryRow}>
-              <BatteryIndicator level={deviceStatus.carBattery} label="小车" />
+              <BatteryIndicator level={carBattery} label="小车" />
             </View>
             <View style={styles.batteryRow}>
-              <BatteryIndicator level={deviceStatus.remoteBattery} label="遥控" />
+              <BatteryIndicator level={remoteBattery} label="遥控" />
             </View>
           </Card>
 
@@ -95,7 +80,7 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.cardTitle}>探测进度</Text>
             <View style={styles.progressContainer}>
               <ProgressRing
-                progress={deviceStatus.progress}
+                progress={progress}
                 size={80}
                 strokeWidth={8}
                 label="完成"
@@ -114,7 +99,7 @@ const HomeScreen: React.FC = () => {
             <View style={styles.infoDivider} />
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>发现目标</Text>
-              <Text style={styles.infoValue}>12 个</Text>
+              <Text style={styles.infoValue}>{detectionCount} 个</Text>
             </View>
             <View style={styles.infoDivider} />
             <View style={styles.infoItem}>
@@ -140,9 +125,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.textPrimary,
+    ...typography.pageTitle,
+    marginBottom: 0, // 由 header 控制间距
   },
   mapCard: {
     height: 250,
@@ -161,9 +145,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   cardTitle: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: spacing.md,
+    ...typography.cardTitle,
   },
   batteryRow: {
     marginBottom: spacing.sm,
@@ -184,14 +166,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   infoLabel: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginBottom: spacing.xs,
+    ...typography.label,
   },
   infoValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.textPrimary,
+    ...typography.value,
   },
   infoDivider: {
     width: 1,

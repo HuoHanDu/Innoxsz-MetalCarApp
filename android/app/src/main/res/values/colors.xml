@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 启动屏背景色 - 与应用深色主题一致 -->
+    <color name="splash_background">#252836</color>
+    <!-- 主题色 -->
+    <color name="primary">#EA7C69</color>
+    <!-- 白色 -->
+    <color name="white">#FFFFFF</color>
+</resources>

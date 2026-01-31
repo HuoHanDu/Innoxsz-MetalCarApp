@@ -8,16 +8,17 @@ import {
   Alert,
 } from 'react-native';
 import {BaseLayout, Card, Button} from '../components';
-import {colors, spacing, borderRadius} from '../theme';
+import {colors, spacing, borderRadius, typography} from '../theme';
 import BleService from '../services/BleService';
+import {UI_CONFIG} from '../constants';
 
 const ControlScreen: React.FC = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [joystickPosition, setJoystickPosition] = useState({x: 0, y: 0});
   const pan = useRef(new Animated.ValueXY()).current;
 
-  const joystickSize = 150;
-  const knobSize = 60;
+  const joystickSize = UI_CONFIG.JOYSTICK_SIZE;
+  const knobSize = UI_CONFIG.JOYSTICK_KNOB_SIZE;
   const maxDistance = (joystickSize - knobSize) / 2;
 
   const panResponder = useRef(
@@ -173,10 +174,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.textPrimary,
-    marginBottom: spacing.lg,
+    ...typography.pageTitle,
   },
   videoCard: {
     height: 200,

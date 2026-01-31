@@ -1,65 +1,20 @@
 import React, {useRef, useCallback, useState, useEffect, useMemo} from 'react';
 import {View, StyleSheet, ViewStyle, Text} from 'react-native';
 import {WebView} from 'react-native-webview';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {colors} from '../theme';
+import {autoSimplifyPath} from '../services/PathPlanner';
 
 interface Point {
   lat: number;
   lng: number;
 }
 
-// Douglas-Peucker 路径简化算法
-const simplifyPath = (points: Point[], tolerance: number): Point[] => {
-  if (points.length <= 2) return points;
-
-  // 计算点到线段的垂直距离
-  const perpendicularDistance = (point: Point, lineStart: Point, lineEnd: Point): number => {
-    const dx = lineEnd.lng - lineStart.lng;
-    const dy = lineEnd.lat - lineStart.lat;
-    
-    if (dx === 0 && dy === 0) {
-      return Math.sqrt(
-        Math.pow(point.lng - lineStart.lng, 2) + 
-        Math.pow(point.lat - lineStart.lat, 2)
-      );
-    }
-    
-    const t = ((point.lng - lineStart.lng) * dx + (point.lat - lineStart.lat) * dy) / (dx * dx + dy * dy);
-    const nearestLng = lineStart.lng + t * dx;
-    const nearestLat = lineStart.lat + t * dy;
-    
-    return Math.sqrt(
-      Math.pow(point.lng - nearestLng, 2) + 
-      Math.pow(point.lat - nearestLat, 2)
-    );
-  };
-
-  // 找到距离最大的点
-  let maxDistance = 0;
-  let maxIndex = 0;
-  const end = points.length - 1;
-
-  for (let i = 1; i < end; i++) {
-    const distance = perpendicularDistance(points[i], points[0], points[end]);
-    if (distance > maxDistance) {
-      maxDistance = distance;
-      maxIndex = i;
-    }
-  }
-
-  // 如果最大距离大于容差，递归简化
-  if (maxDistance > tolerance) {
-    const left = simplifyPath(points.slice(0, maxIndex + 1), tolerance);
-    const right = simplifyPath(points.slice(maxIndex), tolerance);
-    return [...left.slice(0, -1), ...right];
-  }
-
-  return [points[0], points[end]];
-};
-
 interface AMapViewProps {
   style?: ViewStyle;
+  // API Key 配置（从外部传入）
+  apiKey?: string;
+  securityKey?: string;
+  // 地图配置
   center?: Point;
   zoom?: number;
   markers?: Array<{
@@ -69,12 +24,15 @@ interface AMapViewProps {
   }>;
   polygon?: Point[];
   polyline?: Point[];
+  // 事件回调
   onMapClick?: (point: Point) => void;
   onMapReady?: () => void;
 }
 
 export const AMapView: React.FC<AMapViewProps> = ({
   style,
+  apiKey = '',
+  securityKey = '',
   center = {lat: 39.9042, lng: 116.4074},
   zoom = 15,
   markers = [],
@@ -84,33 +42,11 @@ export const AMapView: React.FC<AMapViewProps> = ({
   onMapReady,
 }) => {
   const webViewRef = useRef<WebView>(null);
-  const [amapKey, setAmapKey] = useState<string>('');
-  const [amapSecurityKey, setAmapSecurityKey] = useState<string>('');
-  const [isLoading, setIsLoading] = useState(true);
   const [mapReady, setMapReady] = useState(false);
 
-  // 加载 API Key
-  useEffect(() => {
-    const loadKeys = async () => {
-      try {
-        const [key, securityKey] = await Promise.all([
-          AsyncStorage.getItem('@settings/amapKey'),
-          AsyncStorage.getItem('@settings/amapSecurityKey'),
-        ]);
-        setAmapKey(key || '');
-        setAmapSecurityKey(securityKey || '');
-      } catch (error) {
-        console.error('加载地图 Key 失败:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    loadKeys();
-  }, []);
-
-  // 基础地图 HTML - 只在 amapKey 变化时重新生成
+  // 基础地图 HTML - 只在 apiKey 变化时重新生成
   const mapHTML = useMemo(() => {
-    if (!amapKey) {
+    if (!apiKey) {
       return `
         <html>
         <body style="display:flex;justify-content:center;align-items:center;height:100vh;background:#1F1D2B;color:#ABBBC2;font-family:sans-serif;">
@@ -134,10 +70,10 @@ export const AMapView: React.FC<AMapViewProps> = ({
         </style>
         <script type="text/javascript">
           window._AMapSecurityConfig = {
-            securityJsCode: '${amapSecurityKey}',
+            securityJsCode: '${securityKey}',
           }
         </script>
-        <script src="https://webapi.amap.com/maps?v=2.0&key=${amapKey}"></script>
+        <script src="https://webapi.amap.com/maps?v=2.0&key=${apiKey}"></script>
       </head>
       <body>
         <div id="map"></div>
@@ -190,64 +126,7 @@ export const AMapView: React.FC<AMapViewProps> = ({
             }
           };
 
-          // 更新折线 - 使用原生 Polyline + 路径简化优化
-          var fullPath = null;
-          
-          // Douglas-Peucker 路径简化算法
-          function simplifyPathDP(points, tolerance) {
-            if (points.length <= 2) return points;
-            
-            var maxDist = 0, maxIndex = 0;
-            var end = points.length - 1;
-            
-            for (var i = 1; i < end; i++) {
-              var dist = perpendicularDist(points[i], points[0], points[end]);
-              if (dist > maxDist) {
-                maxDist = dist;
-                maxIndex = i;
-              }
-            }
-            
-            if (maxDist > tolerance) {
-              var left = simplifyPathDP(points.slice(0, maxIndex + 1), tolerance);
-              var right = simplifyPathDP(points.slice(maxIndex), tolerance);
-              return left.slice(0, -1).concat(right);
-            }
-            return [points[0], points[end]];
-          }
-          
-          function perpendicularDist(point, lineStart, lineEnd) {
-            var dx = lineEnd.lng - lineStart.lng;
-            var dy = lineEnd.lat - lineStart.lat;
-            if (dx === 0 && dy === 0) {
-              return Math.sqrt(Math.pow(point.lng - lineStart.lng, 2) + Math.pow(point.lat - lineStart.lat, 2));
-            }
-            var t = ((point.lng - lineStart.lng) * dx + (point.lat - lineStart.lat) * dy) / (dx * dx + dy * dy);
-            var nearestLng = lineStart.lng + t * dx;
-            var nearestLat = lineStart.lat + t * dy;
-            return Math.sqrt(Math.pow(point.lng - nearestLng, 2) + Math.pow(point.lat - nearestLat, 2));
-          }
-          
-          // 根据缩放级别计算简化容差
-          function getToleranceForZoom(zoom) {
-            var baseTolerance = 0.00001;
-            var zoomDiff = 15 - zoom;
-            return baseTolerance * Math.pow(2, Math.max(0, zoomDiff));
-          }
-          
-          // 缩放结束时更新路径显示
-          function onZoomEnd() {
-            if (!fullPath || fullPath.length < 2 || !currentPolyline) return;
-            
-            var zoom = map.getZoom();
-            var tolerance = getToleranceForZoom(zoom);
-            var simplifiedPath = fullPath.length > 100 ? simplifyPathDP(fullPath, tolerance) : fullPath;
-            
-            currentPolyline.setPath(simplifiedPath.map(function(p) { 
-              return new AMap.LngLat(p.lng, p.lat); 
-            }));
-          }
-          
+          // 更新折线
           window.updatePolyline = function(path) {
             // 清除旧的 Polyline
             if (currentPolyline) {
@@ -256,30 +135,17 @@ export const AMapView: React.FC<AMapViewProps> = ({
             }
             
             if (!path || path.length < 2) {
-              fullPath = null;
               return;
             }
             
-            // 保存完整路径用于缩放时重新简化
-            fullPath = path;
-            
-            // 根据当前缩放级别简化路径
-            var zoom = map.getZoom();
-            var tolerance = getToleranceForZoom(zoom);
-            var simplifiedPath = path.length > 100 ? simplifyPathDP(path, tolerance) : path;
-            
-            // 使用原生 Polyline 渲染（更可靠，不会错位）
+            // 使用原生 Polyline 渲染
             currentPolyline = new AMap.Polyline({
-              path: simplifiedPath.map(function(p) { return new AMap.LngLat(p.lng, p.lat); }),
+              path: path.map(function(p) { return new AMap.LngLat(p.lng, p.lat); }),
               strokeColor: '#50D1AA',
               strokeWeight: 3,
               strokeStyle: 'dashed',
               map: map
             });
-            
-            // 监听缩放，动态调整路径精度
-            map.off('zoomend', onZoomEnd);
-            map.on('zoomend', onZoomEnd);
           };
 
           map.on('click', function(e) {
@@ -298,7 +164,7 @@ export const AMapView: React.FC<AMapViewProps> = ({
       </body>
       </html>
     `;
-  }, [amapKey, amapSecurityKey, center, zoom]);
+  }, [apiKey, securityKey, center, zoom]);
 
   // 向地图发送指令
   const sendToMap = useCallback((script: string) => {
@@ -326,23 +192,14 @@ export const AMapView: React.FC<AMapViewProps> = ({
   // 当 polyline 变化时更新（先简化路径再传递）
   useEffect(() => {
     if (!mapReady) return;
-    
+
     if (!polyline || polyline.length < 2) {
       sendToMap(`window.updatePolyline([])`);
       return;
     }
-    
-    // 路径简化：当点数超过阈值时进行抽稀
-    // tolerance 越大简化程度越高，0.00001 约为 1 米精度
-    const SIMPLIFY_THRESHOLD = 200;
-    const TOLERANCE = 0.000005; // 约 0.5 米
-    
-    let pathToSend = polyline;
-    if (polyline.length > SIMPLIFY_THRESHOLD) {
-      pathToSend = simplifyPath(polyline, TOLERANCE);
-      console.log(`路径简化: ${polyline.length} -> ${pathToSend.length} 点`);
-    }
-    
+
+    // 使用 PathPlanner 的路径简化算法
+    const pathToSend = autoSimplifyPath(polyline);
     sendToMap(`window.updatePolyline(${JSON.stringify(pathToSend)})`);
   }, [polyline, mapReady, sendToMap]);
 
@@ -362,14 +219,6 @@ export const AMapView: React.FC<AMapViewProps> = ({
     },
     [onMapClick, onMapReady],
   );
-
-  if (isLoading) {
-    return (
-      <View style={[styles.container, styles.placeholder, style]}>
-        <Text style={styles.placeholderText}>加载中...</Text>
-      </View>
-    );
-  }
 
   return (
     <View style={[styles.container, style]}>
@@ -397,14 +246,6 @@ const styles = StyleSheet.create({
   webview: {
     flex: 1,
     backgroundColor: 'transparent',
-  },
-  placeholder: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  placeholderText: {
-    color: colors.textSecondary,
-    fontSize: 14,
   },
 });
 

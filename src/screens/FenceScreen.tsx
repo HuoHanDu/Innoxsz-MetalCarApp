@@ -1,13 +1,18 @@
 import React, {useState, useCallback, useMemo} from 'react';
 import {View, Text, StyleSheet, Alert, TouchableOpacity} from 'react-native';
 import {BaseLayout, Card, Button, AMapView} from '../components';
-import {colors, spacing} from '../theme';
+import {colors, spacing, typography} from '../theme';
 import PathPlanner, {Point} from '../services/PathPlanner';
 import BleService from '../services/BleService';
+import {useMapKeys} from '../hooks';
+import {useDeviceStore, selectCurrentPosition} from '../stores';
 
 type PolygonMode = 'convex' | 'concave';
 
 const FenceScreen: React.FC = () => {
+  const {keys: mapKeys} = useMapKeys();
+  // 从 store 获取小车当前位置
+  const currentPosition = useDeviceStore(selectCurrentPosition);
   const [fencePoints, setFencePoints] = useState<Point[]>([]);
   const [path, setPath] = useState<Point[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -21,9 +26,10 @@ const FenceScreen: React.FC = () => {
   // 根据模式计算显示用的多边形
   const displayPolygon = useMemo(() => {
     if (fencePoints.length < 3) return undefined;
+    // 外围模式使用凸包，精确模式保持用户绘制顺序
     return polygonMode === 'convex' 
       ? PathPlanner.computeConvexHull(fencePoints)
-      : PathPlanner.sortPointsByAngle(fencePoints);
+      : fencePoints; // 精确模式：保持原始绘制顺序
   }, [fencePoints, polygonMode]);
 
   const handleMapClick = useCallback(
@@ -64,10 +70,10 @@ const FenceScreen: React.FC = () => {
     const length = PathPlanner.calculatePathLength(generatedPath);
     const time = PathPlanner.estimateTime(length);
     
-    // 面积也根据模式计算
+    // 面积也根据模式计算：外围模式用凸包，精确模式用原始顺序
     const areaPolygon = useConvexHull 
       ? PathPlanner.computeConvexHull(fencePoints)
-      : PathPlanner.sortPointsByAngle(fencePoints);
+      : fencePoints;
     const area = PathPlanner.calculatePolygonArea(areaPolygon);
 
     setPathInfo({
@@ -136,13 +142,23 @@ const FenceScreen: React.FC = () => {
         <Card style={styles.mapCard} padding={false}>
           <AMapView
             style={styles.map}
+            apiKey={mapKeys.apiKey}
+            securityKey={mapKeys.securityKey}
+            center={currentPosition || undefined}
             polygon={displayPolygon}
             polyline={path.length > 0 ? path : undefined}
             onMapClick={handleMapClick}
-            markers={fencePoints.map((p, i) => ({
-              position: p,
-              title: `点 ${i + 1}`,
-            }))}
+            markers={[
+              // 小车位置标记
+              ...(currentPosition
+                ? [{position: currentPosition, title: '小车位置'}]
+                : []),
+              // 围栏顶点标记
+              ...fencePoints.map((p, i) => ({
+                position: p,
+                title: `点 ${i + 1}`,
+              })),
+            ]}
           />
         </Card>
 
@@ -155,7 +171,7 @@ const FenceScreen: React.FC = () => {
               </Text>
               <Text style={styles.infoHint}>
                 {polygonMode === 'concave' 
-                  ? '精确模式：支持凹字形等复杂区域' 
+                  ? '精确模式：请按顺时针或逆时针顺序依次点击边界点' 
                   : '外围模式：自动生成最大外围区域'}
               </Text>
             </View>
@@ -239,9 +255,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.textPrimary,
+    ...typography.pageTitle,
     marginBottom: spacing.md,
   },
   modeSwitch: {

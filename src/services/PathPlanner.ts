@@ -8,10 +8,98 @@ export interface PathPlannerConfig {
   direction: 'horizontal' | 'vertical'; // 弓字形方向
 }
 
+import {PATH_CONFIG} from '../constants';
+
+// ==================== 路径简化算法 ====================
+
+/**
+ * 计算点到线段的垂直距离
+ */
+const perpendicularDistance = (point: Point, lineStart: Point, lineEnd: Point): number => {
+  const dx = lineEnd.lng - lineStart.lng;
+  const dy = lineEnd.lat - lineStart.lat;
+
+  if (dx === 0 && dy === 0) {
+    return Math.sqrt(
+      Math.pow(point.lng - lineStart.lng, 2) +
+      Math.pow(point.lat - lineStart.lat, 2)
+    );
+  }
+
+  const t = ((point.lng - lineStart.lng) * dx + (point.lat - lineStart.lat) * dy) / (dx * dx + dy * dy);
+  const nearestLng = lineStart.lng + t * dx;
+  const nearestLat = lineStart.lat + t * dy;
+
+  return Math.sqrt(
+    Math.pow(point.lng - nearestLng, 2) +
+    Math.pow(point.lat - nearestLat, 2)
+  );
+};
+
+/**
+ * Douglas-Peucker 路径简化算法
+ * 用于减少路径点数量，同时保持路径形状
+ * 
+ * @param points 原始路径点数组
+ * @param tolerance 容差值（经纬度单位），越大简化程度越高
+ *                  - 0.00001 约等于 1 米精度
+ *                  - 0.000005 约等于 0.5 米精度
+ * @returns 简化后的路径点数组
+ */
+export const simplifyPath = (points: Point[], tolerance: number): Point[] => {
+  if (points.length <= 2) return [...points];
+
+  // 找到距离最大的点
+  let maxDistance = 0;
+  let maxIndex = 0;
+  const end = points.length - 1;
+
+  for (let i = 1; i < end; i++) {
+    const distance = perpendicularDistance(points[i], points[0], points[end]);
+    if (distance > maxDistance) {
+      maxDistance = distance;
+      maxIndex = i;
+    }
+  }
+
+  // 如果最大距离大于容差，递归简化
+  if (maxDistance > tolerance) {
+    const left = simplifyPath(points.slice(0, maxIndex + 1), tolerance);
+    const right = simplifyPath(points.slice(maxIndex), tolerance);
+    return [...left.slice(0, -1), ...right];
+  }
+
+  return [points[0], points[end]];
+};
+
+/**
+ * 根据点数和阈值自动简化路径
+ * 
+ * @param points 原始路径点数组
+ * @param threshold 点数阈值，超过此值才进行简化，默认 200
+ * @param tolerance 容差值，默认 0.000005（约 0.5 米）
+ * @returns 简化后的路径点数组
+ */
+export const autoSimplifyPath = (
+  points: Point[],
+  threshold: number = PATH_CONFIG.SIMPLIFY_THRESHOLD,
+  tolerance: number = PATH_CONFIG.SIMPLIFY_TOLERANCE
+): Point[] => {
+  if (points.length <= threshold) {
+    return points;
+  }
+
+  const simplified = simplifyPath(points, tolerance);
+  console.log(`路径简化: ${points.length} -> ${simplified.length} 点`);
+  return simplified;
+};
+
+// ==================== PathPlanner 类 ====================
+
 class PathPlanner {
   private static instance: PathPlanner;
   private config: PathPlannerConfig = {
-    spacing: 2,
+    spacing: PATH_CONFIG.DEFAULT_SPACING,
     direction: 'horizontal',
   };
 
@@ -99,97 +187,266 @@ class PathPlanner {
     return (a.lng - o.lng) * (b.lat - o.lat) - (a.lat - o.lat) * (b.lng - o.lng);
   }
 
+  // ==================== 三角剖分算法 ====================
+
+  /**
+   * 耳切法三角剖分 (Ear Clipping Triangulation)
+   * 将简单多边形分割成三角形
+   */
+  private triangulate(polygon: Point[]): Point[][] {
+    if (polygon.length < 3) return [];
+    if (polygon.length === 3) return [polygon];
+
+    const triangles: Point[][] = [];
+    let vertices = [...polygon];
+
+    // 确保多边形是逆时针方向
+    if (this.getPolygonArea(vertices) < 0) {
+      vertices.reverse();
+    }
+
+    while (vertices.length > 3) {
+      let earFound = false;
+
+      for (let i = 0; i < vertices.length; i++) {
+        const prev = vertices[(i - 1 + vertices.length) % vertices.length];
+        const curr = vertices[i];
+        const next = vertices[(i + 1) % vertices.length];
+
+        // 检查是否是凸顶点（耳朵候选）
+        if (this.crossProduct(prev, curr, next) > 0) {
+          // 检查三角形内是否有其他顶点
+          let isEar = true;
+          for (let j = 0; j < vertices.length; j++) {
+            if (j === (i - 1 + vertices.length) % vertices.length || 
+                j === i || 
+                j === (i + 1) % vertices.length) {
+              continue;
+            }
+            if (this.isPointInTriangle(vertices[j], prev, curr, next)) {
+              isEar = false;
+              break;
+            }
+          }
+
+          if (isEar) {
+            triangles.push([prev, curr, next]);
+            vertices.splice(i, 1);
+            earFound = true;
+            break;
+          }
+        }
+      }
+
+      // 如果没有找到耳朵，可能是多边形自相交，强制移除一个顶点
+      if (!earFound) {
+        vertices.splice(0, 1);
+      }
+    }
+
+    if (vertices.length === 3) {
+      triangles.push(vertices);
+    }
+
+    return triangles;
+  }
+
+  /**
+   * 计算多边形有符号面积（用于判断方向）
+   */
+  private getPolygonArea(polygon: Point[]): number {
+    let area = 0;
+    const n = polygon.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      area += polygon[i].lng * polygon[j].lat;
+      area -= polygon[j].lng * polygon[i].lat;
+    }
+    return area / 2;
+  }
+
+  /**
+   * 判断点是否在三角形内
+   */
+  private isPointInTriangle(p: Point, a: Point, b: Point, c: Point): boolean {
+    const d1 = this.crossProduct(a, b, p);
+    const d2 = this.crossProduct(b, c, p);
+    const d3 = this.crossProduct(c, a, p);
+
+    const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
+    const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+
+    return !(hasNeg && hasPos);
+  }
+
+  /**
+   * 在单个三角形内生成弓字形路径
+   */
+  private generateTrianglePath(triangle: Point[]): Point[] {
+    const bounds = this.getBounds(triangle);
+    const spacingDeg = this.metersToLatDegrees(this.config.spacing);
+    const path: Point[] = [];
+
+    let lat = bounds.minLat;
+    let direction = 1;
+
+    while (lat <= bounds.maxLat) {
+      const intersections = this.findIntersections(triangle, lat, 'horizontal');
+
+      if (intersections.length >= 2) {
+        intersections.sort((a, b) => a.lng - b.lng);
+        
+        if (direction === 1) {
+          path.push(intersections[0]);
+          path.push(intersections[intersections.length - 1]);
+        } else {
+          path.push(intersections[intersections.length - 1]);
+          path.push(intersections[0]);
+        }
+        direction *= -1;
+      }
+
+      lat += spacingDeg;
+    }
+
+    return path;
+  }
+
+  /**
+   * 连接多个三角形的路径，优化顺序以减少空行程
+   */
+  private connectTrianglePaths(trianglePaths: Point[][]): Point[] {
+    if (trianglePaths.length === 0) return [];
+    if (trianglePaths.length === 1) return trianglePaths[0];
+
+    // 过滤空路径
+    const validPaths = trianglePaths.filter(p => p.length > 0);
+    if (validPaths.length === 0) return [];
+
+    const result: Point[] = [...validPaths[0]];
+    const used = new Set<number>([0]);
+
+    while (used.size < validPaths.length) {
+      const lastPoint = result[result.length - 1];
+      let nearestIdx = -1;
+      let nearestDist = Infinity;
+      let reverseNearest = false;
+
+      // 找到最近的未使用路径
+      for (let i = 0; i < validPaths.length; i++) {
+        if (used.has(i)) continue;
+
+        const path = validPaths[i];
+        const distToStart = this.pointDistance(lastPoint, path[0]);
+        const distToEnd = this.pointDistance(lastPoint, path[path.length - 1]);
+
+        if (distToStart < nearestDist) {
+          nearestDist = distToStart;
+          nearestIdx = i;
+          reverseNearest = false;
+        }
+        if (distToEnd < nearestDist) {
+          nearestDist = distToEnd;
+          nearestIdx = i;
+          reverseNearest = true;
+        }
+      }
+
+      if (nearestIdx !== -1) {
+        used.add(nearestIdx);
+        const nextPath = reverseNearest 
+          ? [...validPaths[nearestIdx]].reverse() 
+          : validPaths[nearestIdx];
+        result.push(...nextPath);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * 计算两点之间的简单距离（用于路径优化）
+   */
+  private pointDistance(a: Point, b: Point): number {
+    return Math.sqrt(Math.pow(a.lat - b.lat, 2) + Math.pow(a.lng - b.lng, 2));
+  }
+
+  // ==================== 主路径生成方法 ====================
+
   // 生成弓字形覆盖路径（支持凹多边形）
   generateZigzagPath(polygon: Point[], useConvexHull: boolean = false): Point[] {
     if (polygon.length < 3) {
       return [];
     }
 
-    // 根据参数选择使用凸包还是排序后的原始多边形
-    const processedPolygon = useConvexHull 
-      ? this.computeConvexHull(polygon) 
-      : this.sortPointsByAngle(polygon);
+    // 外围模式：使用凸包，直接生成路径
+    if (useConvexHull) {
+      const convexHull = this.computeConvexHull(polygon);
+      return this.generateSimpleZigzagPath(convexHull);
+    }
+
+    // 精确模式：使用三角剖分处理凹多边形
+    const triangles = this.triangulate(polygon);
     
-    const bounds = this.getBounds(processedPolygon);
+    if (triangles.length === 0) {
+      return [];
+    }
+
+    // 为每个三角形生成路径
+    const trianglePaths = triangles.map(tri => this.generateTrianglePath(tri));
+
+    // 连接所有三角形路径
+    return this.connectTrianglePaths(trianglePaths);
+  }
+
+  /**
+   * 为凸多边形生成简单弓字形路径
+   */
+  private generateSimpleZigzagPath(polygon: Point[]): Point[] {
+    const bounds = this.getBounds(polygon);
     const spacingDeg = this.metersToLatDegrees(this.config.spacing);
     const path: Point[] = [];
 
     if (this.config.direction === 'horizontal') {
-      // 水平弓字形
       let lat = bounds.minLat;
-      let direction = 1; // 1: left to right, -1: right to left
+      let direction = 1;
 
       while (lat <= bounds.maxLat) {
-        // 对于凹多边形，可能有多个交点对
-        const intersections = this.findIntersections(processedPolygon, lat, 'horizontal');
+        const intersections = this.findIntersections(polygon, lat, 'horizontal');
 
         if (intersections.length >= 2) {
           intersections.sort((a, b) => a.lng - b.lng);
           
-          // 处理凹多边形的多段交点：成对处理
-          const segments: Array<{start: Point; end: Point}> = [];
-          for (let i = 0; i < intersections.length - 1; i += 2) {
-            if (i + 1 < intersections.length) {
-              segments.push({
-                start: intersections[i],
-                end: intersections[i + 1]
-              });
-            }
-          }
-
-          // 根据方向添加路径段
           if (direction === 1) {
-            for (const seg of segments) {
-              path.push(seg.start);
-              path.push(seg.end);
-            }
+            path.push(intersections[0]);
+            path.push(intersections[intersections.length - 1]);
           } else {
-            for (let i = segments.length - 1; i >= 0; i--) {
-              path.push(segments[i].end);
-              path.push(segments[i].start);
-            }
+            path.push(intersections[intersections.length - 1]);
+            path.push(intersections[0]);
           }
-
           direction *= -1;
         }
 
         lat += spacingDeg;
       }
     } else {
-      // 垂直弓字形
       let lng = bounds.minLng;
       let direction = 1;
       const spacingLng = this.metersToLngDegrees(this.config.spacing, bounds.minLat);
 
       while (lng <= bounds.maxLng) {
-        const intersections = this.findIntersections(processedPolygon, lng, 'vertical');
+        const intersections = this.findIntersections(polygon, lng, 'vertical');
 
         if (intersections.length >= 2) {
           intersections.sort((a, b) => a.lat - b.lat);
 
-          // 处理凹多边形的多段交点
-          const segments: Array<{start: Point; end: Point}> = [];
-          for (let i = 0; i < intersections.length - 1; i += 2) {
-            if (i + 1 < intersections.length) {
-              segments.push({
-                start: intersections[i],
-                end: intersections[i + 1]
-              });
-            }
-          }
-
           if (direction === 1) {
-            for (const seg of segments) {
-              path.push(seg.start);
-              path.push(seg.end);
-            }
+            path.push(intersections[0]);
+            path.push(intersections[intersections.length - 1]);
           } else {
-            for (let i = segments.length - 1; i >= 0; i--) {
-              path.push(segments[i].end);
-              path.push(segments[i].start);
-            }
+            path.push(intersections[intersections.length - 1]);
+            path.push(intersections[0]);
           }
-
           direction *= -1;
         }
 

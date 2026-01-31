@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 沙虫探测器图标 - 简约风格 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    
+    <!-- 外圈 -->
+    <path
+        android:pathData="M60,10 A50,50 0 1,1 59.99,10"
+        android:strokeWidth="3"
+        android:strokeColor="#EA7C69"
+        android:fillColor="@android:color/transparent"/>
+    
+    <!-- 探测波纹1 -->
+    <path
+        android:pathData="M60,25 A35,35 0 1,1 59.99,25"
+        android:strokeWidth="2"
+        android:strokeColor="#EA7C69"
+        android:strokeAlpha="0.6"
+        android:fillColor="@android:color/transparent"/>
+    
+    <!-- 探测波纹2 -->
+    <path
+        android:pathData="M60,40 A20,20 0 1,1 59.99,40"
+        android:strokeWidth="2"
+        android:strokeColor="#EA7C69"
+        android:strokeAlpha="0.3"
+        android:fillColor="@android:color/transparent"/>
+    
+    <!-- 中心点 -->
+    <path
+        android:pathData="M60,55 A5,5 0 1,1 59.99,55"
+        android:fillColor="#EA7C69"/>
+    
+    <!-- 小车轮廓 -->
+    <path
+        android:pathData="M40,80 L80,80 L85,90 L35,90 Z"
+        android:fillColor="#EA7C69"/>
+    
+    <!-- 轮子 -->
+    <path
+        android:pathData="M45,90 A5,5 0 1,1 44.99,90"
+        android:fillColor="#252836"
+        android:strokeWidth="2"
+        android:strokeColor="#EA7C69"/>
+    <path
+        android:pathData="M75,90 A5,5 0 1,1 74.99,90"
+        android:fillColor="#252836"
+        android:strokeWidth="2"
+        android:strokeColor="#EA7C69"/>
+</vector>

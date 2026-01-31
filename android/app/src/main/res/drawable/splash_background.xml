@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 背景色 -->
+    <item android:drawable="@color/splash_background" />
+    
+    <!-- 居中图标 - 使用 drawable 引用矢量图 -->
+    <item
+        android:drawable="@drawable/splash_icon"
+        android:gravity="center"
+        android:width="120dp"
+        android:height="120dp" />
+</layer-list>
